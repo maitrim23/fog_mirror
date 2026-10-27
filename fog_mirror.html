@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fog Mirror</title>
+  
+  <!-- MediaPipe pinned CDN versions -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4.1646425229/face_detection.js" crossorigin="anonymous"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0b0d10;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #e6ebf0;
+    }
+
+    #viewport {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Screen display canvas */
+    #displayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Video element hidden from layout */
+    #webcamVideo {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Start / Permission Screen */
+    #startScreen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at center, #1b2028 0%, #0a0c0f 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 24px;
+      text-align: center;
+      transition: opacity 0.4s ease, visibility 0.4s ease;
+    }
+
+    #startScreen.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .start-card {
+      max-width: 480px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      padding: 44px 36px;
+      box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    .title {
+      font-size: 2.2rem;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+      color: #ffffff;
+      text-shadow: 0 2px 10px rgba(255, 255, 255, 0.15);
+    }
+
+    .subtitle {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: #94a3b8;
+      margin-bottom: 30px;
+    }
+
+    .privacy-notice {
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 28px;
+      line-height: 1.45;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .start-button {
+      background: #ffffff;
+      color: #0b0d10;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 14px 36px;
+      border-radius: 9999px;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(255, 255, 255, 0.2);
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .start-button:hover {
+      background: #f1f5f9;
+      transform: translateY(-1px) scale(1.02);
+      box-shadow: 0 8px 24px rgba(255, 255, 255, 0.3);
+    }
+
+    .start-button:active {
+      transform: translateY(1px) scale(0.98);
+    }
+
+    .error-msg {
+      margin-top: 20px;
+      color: #f87171;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      display: none;
+      background: rgba(239, 68, 68, 0.1);
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    /* UI Controls overlay */
+    #uiLayer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    /* Bottom left pill for brush size slider */
+    .brush-pill {
+      position: absolute;
+      bottom: 28px;
+      left: 28px;
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 18px 8px 16px;
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 9999px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+
+    .brush-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.9);
+      letter-spacing: 0.02em;
+    }
+
+    .brush-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 110px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+      accent-color: #ffffff;
+    }
+
+    .brush-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+      cursor: pointer;
+      border: none;
+    }
+
+    .brush-slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+      cursor: pointer;
+      border: none;
+    }
+
+    /* Shutter button in corner */
+    .shutter-btn {
+      position: absolute;
+      bottom: 28px;
+      right: 28px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      cursor: pointer;
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.18s ease;
+      outline: none;
+    }
+
+    .shutter-btn:hover {
+      background: rgba(255, 255, 255, 0.22);
+      transform: scale(1.05);
+    }
+
+    .shutter-btn:active {
+      transform: scale(0.95);
+    }
+
+    .shutter-inner {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+    }
+
+    /* Hints at top center */
+    .key-hints {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 16px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.55);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(0, 0, 0, 0.22);
+      padding: 6px 16px;
+      border-radius: 20px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      pointer-events: none;
+    }
+
+    .key-hints kbd {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #ffffff;
+      font-family: inherit;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <canvas id="displayCanvas"></canvas>
+    <video id="webcamVideo" playsinline autoplay muted></video>
+
+    <!-- UI Overlay -->
+    <div id="uiLayer">
+      <div class="key-hints">
+        <span><kbd>C</kbd> clear</span>
+        <span><kbd>S</kbd> save</span>
+        <span><kbd>Esc</kbd> exit</span>
+      </div>
+
+      <!-- Bottom left brush control -->
+      <div class="brush-pill">
+        <label class="brush-label" for="brushSlider">brush</label>
+        <input type="range" id="brushSlider" class="brush-slider" min="7" max="38" value="15">
+      </div>
+
+      <!-- Shutter button -->
+      <button id="shutterBtn" class="shutter-btn" title="Save snapshot (S)">
+        <div class="shutter-inner"></div>
+      </button>
+    </div>
+
+    <!-- Start / Permission Screen -->
+    <div id="startScreen">
+      <div class="start-card">
+        <h1 class="title">Fog Mirror</h1>
+        <p class="subtitle">Look into your mirror, point and draw with your index finger to erase the fog, and swipe with an open palm to lay fog back down.</p>
+        
+        <div class="privacy-notice">
+          Everything runs in the browser. No frames, audio, or data ever leave the machine.
+        </div>
+
+        <button id="startButton" class="start-button">Enter Mirror</button>
+        <div id="errorMessage" class="error-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  'use strict';
+
+  // --- GLOBALS & STATE ---
+  let isRunning = false;
+  let videoElement = null;
+  let displayCanvas = null;
+  let displayCtx = null;
+
+  // Offscreen canvases
+  let fogCanvas = null;       // Hidden canvas storing fog density (grayscale/alpha)
+  let fogCtx = null;
+  let frostCanvas = null;     // Intermediate canvas: blurred/tinted camera masked by fog
+  let frostCtx = null;
+
+  // DPR capped at 2
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  // Brush settings
+  let brushRadiusCss = 15;
+  const brushSlider = document.getElementById('brushSlider');
+  brushSlider.addEventListener('input', (e) => {
+    brushRadiusCss = parseFloat(e.target.value);
+  });
+
+  // Smoothing & Tracking State
+  // Raw landmarks smoothed once (0.45), then brush chases that (0.22)
+  let smoothedLandmark = null;  // {x, y} in display coords
+  let brushPos = null;          // {x, y} in display coords
+  let starPos = null;           // {x, y} chasing hand at 0.55
+  let prevDrawnPoint = null;    // Midpoint chaining for quadratic curves
+
+  // Palm wipe tracking
+  let prevPalmPos = null;       // {x, y}
+
+  // Pen State
+  let isPenDown = false;
+  let missingHandFrames = 0;
+  let releasedFramesCount = 0;
+  let handVanishedTimestamp = 0;
+  let isDrawingCurrently = false; // Flag to pause fogging while actively drawing
+
+  // Face position easing
+  let faceCenter = null;        // {x, y} in normalized coords (0..1)
+  let targetFaceCenter = null;  // updated every 5th frame
+  let frameCounter = 0;
+
+  // MediaPipe detectors
+  let handsDetector = null;
+  let faceDetector = null;
+  let isHandsBusy = false;
+  let isFaceBusy = false;
+  let latestHandResults = null;
+  let latestFaceResults = null;
+
+  // DOM Elements
+  const startScreen = document.getElementById('startScreen');
+  const startButton = document.getElementById('startButton');
+  const errorMessage = document.getElementById('errorMessage');
+  const shutterBtn = document.getElementById('shutterBtn');
+
+  // Key shortcuts
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyC') {
+      clearDrawing();
+    } else if (e.code === 'KeyS') {
+      saveSnapshot();
+    } else if (e.code === 'Escape') {
+      stopSession();
+    }
+  });
+
+  shutterBtn.addEventListener('click', saveSnapshot);
+
+  startButton.addEventListener('click', () => {
+    initApp().catch((err) => {
+      console.error('initApp caught error:', err);
+      showError('Unexpected error starting mirror: ' + (err.message || err));
+      startButton.disabled = false;
+      startButton.textContent = 'Enter Mirror';
+    });
+  });
+
+  function showError(msg) {
+    errorMessage.style.color = '#f87171';
+    errorMessage.style.background = 'rgba(239, 68, 68, 0.1)';
+    errorMessage.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+    errorMessage.textContent = msg;
+    errorMessage.style.display = 'block';
+  }
+
+  // --- INITIALIZATION ---
+  async function initApp() {
+    errorMessage.style.display = 'none';
+
+    // Check secure context (HTTPS, localhost, or 127.0.0.1)
+    const isLocal = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1' || 
+                    window.location.hostname === '[::1]';
+    if (window.location.protocol === 'file:') {
+      showError('getUserMedia only works on https or localhost; opening the file by double-clicking (file://) will fail. Please serve this via a local HTTP server (e.g. npx serve or python -m http.server).');
+      return;
+    }
+    if (!window.isSecureContext && !isLocal) {
+      showError('Webcam access requires a secure context (HTTPS or localhost).');
+      return;
+    }
+
+    startButton.disabled = true;
+    startButton.textContent = 'Waiting for permission...';
+
+    // Show friendly instruction while the browser prompt is active
+    errorMessage.style.color = '#94a3b8';
+    errorMessage.style.background = 'rgba(255, 255, 255, 0.06)';
+    errorMessage.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+    errorMessage.textContent = 'Please click "Allow" in your browser prompt for camera access.';
+    errorMessage.style.display = 'block';
+
+    displayCanvas = document.getElementById('displayCanvas');
+    displayCtx = displayCanvas.getContext('2d', { alpha: false });
+    videoElement = document.getElementById('webcamVideo');
+
+    fogCanvas = document.createElement('canvas');
+    fogCtx = fogCanvas.getContext('2d');
+
+    frostCanvas = document.createElement('canvas');
+    frostCtx = frostCanvas.getContext('2d');
+
+    resizeCanvases();
+    window.addEventListener('resize', resizeCanvases);
+
+    // Initial fog fill: opacity 0.55
+    initFogDensity(0.55);
+
+    // 1. Camera setup FIRST - mirrored webcam with fallback constraints
+    let videoStream = null;
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user'
+        }
+      });
+    } catch (camErr) {
+      console.warn('Ideal camera constraints rejected, trying basic video:', camErr);
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (finalCamErr) {
+        console.error('Camera error:', finalCamErr);
+        errorMessage.style.color = '#f87171';
+        errorMessage.style.background = 'rgba(239, 68, 68, 0.1)';
+        errorMessage.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+        showError('Camera access was refused or is unavailable. Please grant camera permission to use the fog mirror.');
+        startButton.disabled = false;
+        startButton.textContent = 'Enter Mirror';
+        return;
+      }
+    }
+
+    videoElement.srcObject = videoStream;
+    try {
+      await videoElement.play();
+    } catch (playErr) {
+      console.warn('video.play() failed, waiting for user gesture/autoplay:', playErr);
+    }
+
+    startButton.textContent = 'Loading mirror models...';
+
+    // 2. Initialize MediaPipe models (Hands)
+    try {
+      await initMediaPipe();
+    } catch (err) {
+      console.error('Failed to init MediaPipe:', err);
+      showError('Failed to initialize hand tracking model from CDN: ' + (err.message || err));
+      startButton.disabled = false;
+      startButton.textContent = 'Enter Mirror';
+      return;
+    }
+
+    // Hide start screen immediately upon successful initialization
+    startScreen.classList.add('hidden');
+    isRunning = true;
+    startButton.disabled = false;
+    startButton.textContent = 'Enter Mirror';
+
+    // Start render loop
+    requestAnimationFrame(renderLoop);
+  }
+
+  function resizeCanvases() {
+    const width = Math.floor(window.innerWidth * dpr);
+    const height = Math.floor(window.innerHeight * dpr);
+
+    // Save current fog content if already initialized
+    let tempFogCanvas = null;
+    if (fogCanvas && fogCanvas.width > 0 && fogCanvas.height > 0) {
+      tempFogCanvas = document.createElement('canvas');
+      tempFogCanvas.width = fogCanvas.width;
+      tempFogCanvas.height = fogCanvas.height;
+      const tCtx = tempFogCanvas.getContext('2d');
+      tCtx.drawImage(fogCanvas, 0, 0);
+    }
+
+    displayCanvas.width = width;
+    displayCanvas.height = height;
+
+    fogCanvas.width = width;
+    fogCanvas.height = height;
+
+    frostCanvas.width = width;
+    frostCanvas.height = height;
+
+    if (tempFogCanvas) {
+      fogCtx.drawImage(tempFogCanvas, 0, 0, width, height);
+    }
+  }
+
+  function initFogDensity(opacity) {
+    fogCtx.save();
+    fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+    fogCtx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+    fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+    fogCtx.restore();
+  }
+
+  // --- MEDIAPIPE INITIALIZATION ---
+  async function waitForMediaPipe() {
+    let attempts = 0;
+    while (typeof Hands === 'undefined' && attempts < 50) {
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+    }
+    if (typeof Hands === 'undefined') {
+      throw new Error('MediaPipe Hands script did not load from CDN. Please check your internet connection.');
+    }
+  }
+
+  async function initMediaPipe() {
+    await waitForMediaPipe();
+
+    handsDetector = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+    });
+
+    handsDetector.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.3,
+      minTrackingConfidence: 0.3
+    });
+
+    handsDetector.onResults((results) => {
+      latestHandResults = results;
+      isHandsBusy = false;
+    });
+  }
+
+  // --- RENDER & SIMULATION LOOP ---
+  function renderLoop() {
+    if (!isRunning) return;
+
+    frameCounter++;
+
+    // 1. Process hand detector frames sequentially without overlapping sends
+    if (videoElement.readyState >= 2) {
+      if (!isHandsBusy && handsDetector) {
+        isHandsBusy = true;
+        handsDetector.send({ image: videoElement }).catch((e) => {
+          console.error(e);
+          isHandsBusy = false;
+        });
+      }
+    }
+
+    // 2. Process Hands & Gestures (Index Finger Erase or Fist Fog)
+    processHandInteractions();
+
+    // 3. Compose the Three Stacked Layers
+    composeLayers();
+
+    // 4. Draw Star at index finger tip on top
+    drawFingertipStar();
+
+    requestAnimationFrame(renderLoop);
+  }
+
+  // --- HAND GESTURES & ERASING ---
+  function processHandInteractions() {
+    isDrawingCurrently = false;
+
+    if (!latestHandResults || !latestHandResults.multiHandLandmarks || latestHandResults.multiHandLandmarks.length === 0) {
+      handleHandAbsence();
+      return;
+    }
+
+    missingHandFrames = 0;
+    const rawLandmarks = latestHandResults.multiHandLandmarks[0];
+
+    // Landmark references:
+    // 0: Wrist
+    // 4: Thumb tip
+    // 5: Index MCP (knuckle)
+    // 6: Index PIP
+    // 8: Index tip
+    // 9: Middle MCP (knuckle)
+    // 10: Middle PIP
+    // 12: Middle tip
+    // 14: Ring PIP
+    // 16: Ring tip
+    // 17: Pinky MCP
+    // 18: Pinky PIP
+    // 20: Pinky tip
+
+    const wrist = rawLandmarks[0];
+    const thumbTip = rawLandmarks[4];
+    const indexMcp = rawLandmarks[5];
+    const indexPip = rawLandmarks[6];
+    const indexTip = rawLandmarks[8];
+    const middleMcp = rawLandmarks[9];
+    const middlePip = rawLandmarks[10];
+    const middleTip = rawLandmarks[12];
+    const ringPip = rawLandmarks[14];
+    const ringTip = rawLandmarks[16];
+    const pinkyMcp = rawLandmarks[17];
+    const pinkyPip = rawLandmarks[18];
+    const pinkyTip = rawLandmarks[20];
+
+    // Distances in normalized 3D/2D space
+    function dist2D(p1, p2) {
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    const handScale = dist2D(wrist, middleMcp);
+    if (handScale < 0.01) return; // Malformed hand detection
+
+    // Distances from wrist to fingertips vs PIP joints (to check finger extensions)
+    const dWristThumbTip = dist2D(wrist, thumbTip);
+    const dWristIndexTip = dist2D(wrist, indexTip);
+    const dWristIndexPip = dist2D(wrist, indexPip);
+    const dWristMiddleTip = dist2D(wrist, middleTip);
+    const dWristMiddlePip = dist2D(wrist, middlePip);
+    const dWristRingTip = dist2D(wrist, ringTip);
+    const dWristRingPip = dist2D(wrist, ringPip);
+    const dWristPinkyTip = dist2D(wrist, pinkyTip);
+    const dWristPinkyPip = dist2D(wrist, pinkyPip);
+
+    // Individual finger extension flags:
+    const isIndexExtended = (dWristIndexTip > dWristIndexPip * 1.05);
+    const isMiddleExtended = (dWristMiddleTip > dWristMiddlePip * 1.05);
+    const isRingExtended = (dWristRingTip > dWristRingPip * 1.05);
+    const isPinkyExtended = (dWristPinkyTip > dWristPinkyPip * 1.05);
+
+    // OPEN PALM: All four primary fingers extended out flat (open hand wipe)
+    const isOpenPalm = isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended;
+
+    // Convert landmark to mirror display pixel coords, accounting for object-fit: cover
+    function toDisplayCoords(p) {
+      const w = displayCanvas.width;
+      const h = displayCanvas.height;
+      const vW = videoElement.videoWidth || w;
+      const vH = videoElement.videoHeight || h;
+
+      const videoRatio = vW / vH;
+      const canvasRatio = w / h;
+
+      // Normalized coordinates within the unmirrored camera frame (0..1)
+      // Since video is horizontally mirrored in the mirror view:
+      const mirrorNormX = 1.0 - p.x;
+      const normY = p.y;
+
+      let screenX, screenY;
+
+      if (videoRatio > canvasRatio) {
+        // Video is wider: horizontal sides are cropped
+        const visibleWidthFrac = canvasRatio / videoRatio;
+        const cropX = (1.0 - visibleWidthFrac) * 0.5;
+        screenX = ((mirrorNormX - cropX) / visibleWidthFrac) * w;
+        screenY = normY * h;
+      } else {
+        // Video is taller: top and bottom are cropped
+        const visibleHeightFrac = videoRatio / canvasRatio;
+        const cropY = (1.0 - visibleHeightFrac) * 0.5;
+        screenX = mirrorNormX * w;
+        screenY = ((normY - cropY) / visibleHeightFrac) * h;
+      }
+
+      return {
+        x: Math.max(0, Math.min(w, screenX)),
+        y: Math.max(0, Math.min(h, screenY))
+      };
+    }
+
+    if (isOpenPalm) {
+      // Pen is not down when open palm is active
+      isPenDown = false;
+      prevDrawnPoint = null;
+      smoothedLandmark = null;
+      brushPos = null;
+
+      // Open Palm Wipe:
+      // Palm center: midpoint between wrist and middle knuckle
+      const palmMid = {
+        x: (wrist.x + middleMcp.x) * 0.5,
+        y: (wrist.y + middleMcp.y) * 0.5
+      };
+      const curPalmDisplay = toDisplayCoords(palmMid);
+
+      // Palm width: max of (index to pinky knuckles) and (wrist to middle knuckle)
+      const widthKnuckles = dist2D(indexMcp, pinkyMcp);
+      const widthLength = handScale;
+      const handWidthNorm = Math.max(widthKnuckles, widthLength);
+
+      // Wipe radius 1.8x hand width in display pixels for full sleeve/palm coverage
+      const wipeRadius = 1.8 * (handWidthNorm * displayCanvas.width);
+
+      executePalmWipe(curPalmDisplay, wipeRadius);
+      return;
+    } else {
+      prevPalmPos = null;
+    }
+
+    // --- INDEX FINGER DRAWING ---
+    // Point with your index finger while middle/ring/pinky fingers are not all extended
+    // Direct tracking: index fingertip (landmark 8)
+    const targetLandmark = toDisplayCoords(indexTip);
+
+    // Pen state: pen down when index finger is clearly pointing out
+    if (!isPenDown) {
+      if (isIndexExtended) {
+        isPenDown = true;
+        releasedFramesCount = 0;
+        // Start from a fresh origin: snap brush and smoothing directly to current finger
+        smoothedLandmark = { ...targetLandmark };
+        brushPos = { ...targetLandmark };
+        starPos = { ...targetLandmark };
+        prevDrawnPoint = null;
+      }
+    } else {
+      // Require 3 consecutive released frames before lifting pen
+      if (!isIndexExtended) {
+        releasedFramesCount++;
+        if (releasedFramesCount >= 3) {
+          isPenDown = false;
+          prevDrawnPoint = null;
+          smoothedLandmark = null;
+          brushPos = null;
+        }
+      } else {
+        releasedFramesCount = 0;
+      }
+    }
+
+    // Star point chasing hand at 0.55 (sits directly on index fingertip)
+    if (!starPos) {
+      starPos = { ...targetLandmark };
+    } else {
+      starPos.x += (targetLandmark.x - starPos.x) * 0.55;
+      starPos.y += (targetLandmark.y - starPos.y) * 0.55;
+    }
+
+    // Brush smoothing:
+    // 1st pass: ease raw landmark toward target at 0.45
+    if (!smoothedLandmark) {
+      smoothedLandmark = { ...targetLandmark };
+    } else {
+      smoothedLandmark.x += (targetLandmark.x - smoothedLandmark.x) * 0.45;
+      smoothedLandmark.y += (targetLandmark.y - smoothedLandmark.y) * 0.45;
+    }
+
+    // 2nd pass: brush chases smoothed landmark at 0.22
+    if (!brushPos) {
+      brushPos = { ...smoothedLandmark };
+    } else {
+      brushPos.x += (smoothedLandmark.x - brushPos.x) * 0.22;
+      brushPos.y += (smoothedLandmark.y - brushPos.y) * 0.22;
+    }
+
+    if (isPenDown) {
+      isDrawingCurrently = true;
+      executePenErase(brushPos);
+    } else {
+      prevDrawnPoint = null;
+    }
+  }
+
+  function handleHandAbsence() {
+    missingHandFrames++;
+    if (missingHandFrames === 1) {
+      handVanishedTimestamp = performance.now();
+    }
+
+    // Allow 400ms grace period when reaching boundaries before cutting the stroke
+    const elapsed = performance.now() - handVanishedTimestamp;
+    if (elapsed > 400) {
+      isPenDown = false;
+      prevDrawnPoint = null;
+      prevPalmPos = null;
+      starPos = null;
+      smoothedLandmark = null;
+      brushPos = null;
+    }
+  }
+
+  // --- ERASE WITH PINCH BRUSH ---
+  function executePenErase(point) {
+    const radius = brushRadiusCss * dpr;
+
+    if (!prevDrawnPoint) {
+      prevDrawnPoint = { ...point };
+      // Erase a soft circular stamp at start point
+      stampErase(point.x, point.y, radius, 1.0);
+      return;
+    }
+
+    const dx = point.x - prevDrawnPoint.x;
+    const dy = point.y - prevDrawnPoint.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Ignore movement under 0.0006 of screen width as tremor
+    const tremorThreshold = 0.0006 * displayCanvas.width;
+    if (dist < tremorThreshold) {
+      return;
+    }
+
+    // Quadratic curve interpolation through midpoint of pair
+    const midX = (prevDrawnPoint.x + point.x) * 0.5;
+    const midY = (prevDrawnPoint.y + point.y) * 0.5;
+
+    // Use destination-out to subtract from fog canvas
+    fogCtx.save();
+    fogCtx.globalCompositeOperation = 'destination-out';
+    fogCtx.strokeStyle = 'rgba(0, 0, 0, 1)';
+    fogCtx.lineWidth = radius * 2;
+    fogCtx.lineCap = 'round';
+    fogCtx.lineJoin = 'round';
+
+    fogCtx.beginPath();
+    fogCtx.moveTo(prevDrawnPoint.x, prevDrawnPoint.y);
+    fogCtx.quadraticCurveTo(prevDrawnPoint.x, prevDrawnPoint.y, midX, midY);
+    fogCtx.stroke();
+
+    fogCtx.restore();
+
+    prevDrawnPoint = { x: midX, y: midY };
+  }
+
+  // --- RE-FOG WITH OPEN PALM SWIPE ---
+  // Moving the open palm across the mirror deposits fresh fog, covering up clear strokes
+  function executePalmWipe(currentPos, wipeRadius) {
+    if (!prevPalmPos) {
+      prevPalmPos = { ...currentPos };
+      stampPalmFog(currentPos.x, currentPos.y, wipeRadius, 0.45);
+      return;
+    }
+
+    const dx = currentPos.x - prevPalmPos.x;
+    const dy = currentPos.y - prevPalmPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // If moved > 30% of screen in one frame, skip interpolation and stamp once
+    const maxJump = displayCanvas.width * 0.30;
+    if (dist > maxJump) {
+      stampPalmFog(currentPos.x, currentPos.y, wipeRadius, 0.45);
+      prevPalmPos = { ...currentPos };
+      return;
+    }
+
+    // Lay soft radial fog gradients along distance travelled
+    const stepDist = Math.max(wipeRadius * 0.35, 4);
+    const numStamps = Math.min(Math.floor(dist / stepDist), 40); // Cap at 40 stamps
+
+    if (numStamps === 0) {
+      return;
+    }
+
+    for (let i = 1; i <= numStamps; i++) {
+      const t = i / numStamps;
+      const x = prevPalmPos.x + dx * t;
+      const y = prevPalmPos.y + dy * t;
+      stampPalmFog(x, y, wipeRadius, 0.45);
+    }
+
+    prevPalmPos = { ...currentPos };
+  }
+
+  // Soft stamp adding fog with source-over
+  function stampPalmFog(x, y, radius, opacity) {
+    fogCtx.save();
+    fogCtx.globalCompositeOperation = 'source-over';
+
+    const grad = fogCtx.createRadialGradient(x, y, radius * 0.2, x, y, radius);
+    grad.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+    grad.addColorStop(0.7, `rgba(255, 255, 255, ${opacity * 0.5})`);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+    fogCtx.fillStyle = grad;
+    fogCtx.beginPath();
+    fogCtx.arc(x, y, radius, 0, Math.PI * 2);
+    fogCtx.fill();
+
+    fogCtx.restore();
+  }
+
+  // Soft stamp erase with destination-out for pen strokes
+  function stampErase(x, y, radius, opacity) {
+    fogCtx.save();
+    fogCtx.globalCompositeOperation = 'destination-out';
+
+    const grad = fogCtx.createRadialGradient(x, y, radius * 0.25, x, y, radius);
+    grad.addColorStop(0, `rgba(0, 0, 0, ${opacity})`);
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    fogCtx.fillStyle = grad;
+    fogCtx.beginPath();
+    fogCtx.arc(x, y, radius, 0, Math.PI * 2);
+    fogCtx.fill();
+
+    fogCtx.restore();
+  }
+
+  // --- THREE STACKED LAYERS COMPOSITION ---
+  function composeLayers() {
+    const w = displayCanvas.width;
+    const h = displayCanvas.height;
+
+    // Layer 1: Camera mirrored horizontally on displayCanvas
+    displayCtx.save();
+    displayCtx.clearRect(0, 0, w, h);
+    displayCtx.translate(w, 0);
+    displayCtx.scale(-1, 1);
+    drawCover(displayCtx, videoElement, w, h);
+    displayCtx.restore();
+
+    // Layer 3: Frost Canvas (Blurred, brightened, tinted camera masked by Fog Canvas)
+    // Blur 18px (CSS pixels scaled by DPR), brightness 1.18, tint rgb(242,238,231) + 0.62 white
+    const blurPx = 18 * dpr;
+
+    frostCtx.save();
+    frostCtx.clearRect(0, 0, w, h);
+
+    // Draw blurred & brightened camera
+    frostCtx.filter = `blur(${blurPx}px) brightness(1.18)`;
+    frostCtx.save();
+    frostCtx.translate(w, 0);
+    frostCtx.scale(-1, 1);
+    drawCover(frostCtx, videoElement, w, h);
+    frostCtx.restore();
+
+    // Reset filter for tint overlay
+    frostCtx.filter = 'none';
+
+    // Apply tint rgb(242, 238, 231) and 0.62 white mixed in
+    frostCtx.fillStyle = 'rgb(242, 238, 231)';
+    frostCtx.globalCompositeOperation = 'color';
+    frostCtx.fillRect(0, 0, w, h);
+
+    // Mix in 0.62 white: fog that is only blurred doesn't read as fog, it needs a little white
+    frostCtx.globalCompositeOperation = 'source-over';
+    frostCtx.fillStyle = 'rgba(255, 255, 255, 0.62)';
+    frostCtx.fillRect(0, 0, w, h);
+
+    // Mask with fog canvas using globalCompositeOperation = 'destination-in'
+    frostCtx.globalCompositeOperation = 'destination-in';
+    frostCtx.drawImage(fogCanvas, 0, 0, w, h);
+
+    frostCtx.restore();
+
+    // Draw frost layer onto display canvas
+    displayCtx.drawImage(frostCanvas, 0, 0, w, h);
+  }
+
+  // Helper to draw video to canvas with 'cover' aspect ratio
+  function drawCover(ctx, video, destW, destH) {
+    if (!video.videoWidth || !video.videoHeight) return;
+
+    const vW = video.videoWidth;
+    const vH = video.videoHeight;
+    const videoRatio = vW / vH;
+    const destRatio = destW / destH;
+
+    let sW, sH, sX, sY;
+    if (videoRatio > destRatio) {
+      sH = vH;
+      sW = vH * destRatio;
+      sX = (vW - sW) * 0.5;
+      sY = 0;
+    } else {
+      sW = vW;
+      sH = vW / destRatio;
+      sX = 0;
+      sY = (vH - sH) * 0.5;
+    }
+
+    ctx.drawImage(video, sX, sY, sW, sH, 0, 0, destW, destH);
+  }
+
+  // --- GLOWING STAR ON FINGERTIP ---
+  function drawFingertipStar() {
+    if (!starPos || missingHandFrames > 0) return;
+
+    const x = starPos.x;
+    const y = starPos.y;
+    const r = (isPenDown ? 9 : 6) * dpr;
+
+    displayCtx.save();
+    displayCtx.globalCompositeOperation = 'screen';
+
+    // Outer soft glow
+    const glow = displayCtx.createRadialGradient(x, y, 0, x, y, r * 2.5);
+    glow.addColorStop(0, isPenDown ? 'rgba(255, 255, 255, 0.95)' : 'rgba(210, 230, 255, 0.7)');
+    glow.addColorStop(0.5, isPenDown ? 'rgba(200, 235, 255, 0.35)' : 'rgba(180, 210, 255, 0.2)');
+    glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+    displayCtx.fillStyle = glow;
+    displayCtx.beginPath();
+    displayCtx.arc(x, y, r * 2.5, 0, Math.PI * 2);
+    displayCtx.fill();
+
+    // 4-pointed star
+    displayCtx.fillStyle = '#ffffff';
+    displayCtx.beginPath();
+    const spikes = 4;
+    const outerRadius = r * 1.5;
+    const innerRadius = r * 0.35;
+    let rot = Math.PI / 2 * 3;
+    let step = Math.PI / spikes;
+
+    displayCtx.moveTo(x, y - outerRadius);
+    for (let i = 0; i < spikes; i++) {
+      let curX = x + Math.cos(rot) * outerRadius;
+      let curY = y + Math.sin(rot) * outerRadius;
+      displayCtx.lineTo(curX, curY);
+      rot += step;
+
+      curX = x + Math.cos(rot) * innerRadius;
+      curY = y + Math.sin(rot) * innerRadius;
+      displayCtx.lineTo(curX, curY);
+      rot += step;
+    }
+    displayCtx.lineTo(x, y - outerRadius);
+    displayCtx.closePath();
+    displayCtx.fill();
+
+    displayCtx.restore();
+  }
+
+  // --- ACTIONS ---
+  function clearDrawing() {
+    // Re-fill fog to initial opacity 0.55
+    initFogDensity(0.55);
+  }
+
+  function saveSnapshot() {
+    if (!displayCanvas) return;
+    const link = document.createElement('a');
+    link.download = `fog-mirror-${Date.now()}.png`;
+    link.href = displayCanvas.toDataURL('image/png');
+    link.click();
+  }
+
+  function stopSession() {
+    isRunning = false;
+    startScreen.classList.remove('hidden');
+
+    if (videoElement && videoElement.srcObject) {
+      const tracks = videoElement.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+      videoElement.srcObject = null;
+    }
+  }
+  </script>
+</body>
+</html>
